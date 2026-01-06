@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -22,17 +23,40 @@ func main() {
 	defer newConnection.Close()
 
 	fmt.Println("Server connection successful")
+	gamelogic.PrintServerHelp()
 
 	channel, err := newConnection.Channel()
 	if err != nil {
 		log.Fatalf("Trouble creating connection channel: %v", err)
 	}
 
-	messageSent := pubsub.PublishJSON(channel, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{
-		IsPaused: true,
-	})
-	if messageSent != nil {
-		log.Fatalf("Error sending message to RabbitMQ: %v", err)
+	for {
+		result := gamelogic.GetInput()
+		if len(result) == 0 {
+			continue
+		} else if result[0] == "pause" {
+			log.Println("Sending pause message.")
+			messageSent := pubsub.PublishJSON(channel, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{
+				IsPaused: true,
+			})
+			if messageSent != nil {
+				log.Fatalf("Error sending message to RabbitMQ: %v", err)
+			}
+		} else if result[0] == "resume" {
+			log.Println("Sending pause message.")
+			messageSent := pubsub.PublishJSON(channel, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{
+				IsPaused: false,
+			})
+			if messageSent != nil {
+				log.Fatalf("Error sending message to RabbitMQ: %v", err)
+			}
+		} else if result[0] == "quit" {
+			log.Println("Exiting game.")
+			break
+		} else {
+			log.Println("Sorry I do not understand the request.")
+		}
+
 	}
 
 	signalChan := make(chan os.Signal, 1)
