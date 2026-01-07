@@ -30,6 +30,11 @@ func main() {
 		log.Fatalf("Trouble creating connection channel: %v", err)
 	}
 
+	_, _, binderr := pubsub.DeclareAndBind(newConnection, routing.ExchangePerilTopic, routing.GameLogSlug, routing.GameLogSlug+".*", pubsub.Durable)
+	if binderr != nil {
+		log.Fatalf("Error binding to channel and queue: %s", binderr)
+	}
+
 	for {
 		result := gamelogic.GetInput()
 		if len(result) == 0 {
@@ -43,7 +48,7 @@ func main() {
 				log.Fatalf("Error sending message to RabbitMQ: %v", err)
 			}
 		} else if result[0] == "resume" {
-			log.Println("Sending pause message.")
+			log.Println("Sending resume message.")
 			messageSent := pubsub.PublishJSON(channel, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{
 				IsPaused: false,
 			})
