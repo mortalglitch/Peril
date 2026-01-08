@@ -27,6 +27,11 @@ func main() {
 		log.Fatalf("Failed to build username: %s", err)
 	}
 
+	rabbitChannel, err := newConnection.Channel()
+	if err != nil {
+		log.Fatalf("Error connecting to channel: %s", err)
+	}
+
 	_, _, binderr := pubsub.DeclareAndBind(newConnection, routing.ExchangePerilDirect, routing.PauseKey+"."+usernameString, routing.PauseKey, pubsub.Transient)
 	if binderr != nil {
 		log.Fatalf("Error binding to channel and queue: %s", binderr)
@@ -39,14 +44,14 @@ func main() {
 		log.Fatalf("Error with subscribe process: %v", pauseSubSuccess)
 	}
 
-	moveSubSuccess := pubsub.SubscribeJSON(newConnection, routing.ExchangePerilTopic, routing.ArmyMovesPrefix+"."+usernameString, routing.ArmyMovesPrefix+".*", pubsub.Transient, handlerMove(newState))
+	moveSubSuccess := pubsub.SubscribeJSON(newConnection, routing.ExchangePerilTopic, routing.ArmyMovesPrefix+"."+usernameString, routing.ArmyMovesPrefix+".*", pubsub.Transient, handlerMove(newState, rabbitChannel))
 	if moveSubSuccess != nil {
 		log.Fatalf("Error getting moves from MQ %v", moveSubSuccess)
 	}
 
-	rabbitChannel, err := newConnection.Channel()
-	if err != nil {
-		log.Fatalf("Error connecting to channel: %s", binderr)
+	warSubSuccess := pubsub.SubscribeJSON(newConnection, routing.ExchangePerilTopic, routing.WarRecognitionsPrefix, routing.WarRecognitionsPrefix+".*", pubsub.Durable, handlerWar(newState))
+	if warSubSuccess != nil {
+		log.Fatalf("Error getting moves from MQ %v", warSubSuccess)
 	}
 
 	for {
@@ -93,14 +98,42 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.Ack
 	}
 }
 
-func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) pubsub.AckType {
+func handlerMove(gs *gamelogic.GameState, rabbitChannel *amqp.Channel) func(gamelogic.ArmyMove) pubsub.AckType {
 	return func(am gamelogic.ArmyMove) pubsub.AckType {
 		defer fmt.Print("> ")
 		moveOutcome := gs.HandleMove(am)
-		if moveOutcome == gamelogic.MoveOutComeSafe || moveOutcome == gamelogic.MoveOutcomeMakeWar {
+		if moveOutcome == gamelogic.MoveOutComeSafe {
 			return pubsub.Ack
+		} else if moveOutcome == gamelogic.MoveOutcomeMakeWar {
+			rOW := gamelogic.RecognitionOfWar{
+				Attacker: am.Player,
+				Defender: gs.GetPlayerSnap(),
+			}
+			pubsub.PublishJSON(rabbitChannel, routing.ExchangePerilTopic, routing.WarRecognitionsPrefix+"."+gs.GetUsername(), rOW)
+			return pubsub.NackRequeue
 		}
 
+		return pubsub.NackDiscard
+	}
+}
+
+func handlerWar(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) pubsub.AckType {
+	return func(row gamelogic.RecognitionOfWar) pubsub.AckType {
+		defer fmt.Print("> ")
+		outcome, _, _ := gs.HandleWar(row)
+		switch outcome {
+		case gamelogic.WarOutcomeNotInvolved:
+			return pubsub.NackRequeue
+		case gamelogic.WarOutcomeNoUnits:
+			return pubsub.NackDiscard
+		case gamelogic.WarOutcomeOpponentWon:
+			return pubsub.Ack
+		case gamelogic.WarOutcomeYouWon:
+			return pubsub.Ack
+		case gamelogic.WarOutcomeDraw:
+			return pubsub.Ack
+		}
+		fmt.Println("error: unknown war outcome")
 		return pubsub.NackDiscard
 	}
 }

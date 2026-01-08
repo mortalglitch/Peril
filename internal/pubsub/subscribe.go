@@ -50,6 +50,6 @@ func workerRoutine[T any](messages <-chan amqp.Delivery, handler func(T) AckType
 		} else if ackType == NackDiscard {
 			msg.Nack(false, false)
 		}
-		log.Printf("AckType Sent: %s", ackType)
+		//log.Printf("AckType Sent: %s", ackType)
 	}
 }
