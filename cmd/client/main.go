@@ -34,9 +34,19 @@ func main() {
 
 	newState := gamelogic.NewGameState(usernameString)
 
-	subscribeSuccess := pubsub.SubscribeJSON(newConnection, routing.ExchangePerilDirect, routing.PauseKey+"."+usernameString, routing.PauseKey, pubsub.Transient, handlerPause(newState))
-	if subscribeSuccess != nil {
-		log.Fatalf("Error with subscribe process: %v", subscribeSuccess)
+	pauseSubSuccess := pubsub.SubscribeJSON(newConnection, routing.ExchangePerilDirect, routing.PauseKey+"."+usernameString, routing.PauseKey, pubsub.Transient, handlerPause(newState))
+	if pauseSubSuccess != nil {
+		log.Fatalf("Error with subscribe process: %v", pauseSubSuccess)
+	}
+
+	moveSubSuccess := pubsub.SubscribeJSON(newConnection, routing.ExchangePerilTopic, routing.ArmyMovesPrefix+"."+usernameString, routing.ArmyMovesPrefix+".*", pubsub.Transient, handlerMove(newState))
+	if moveSubSuccess != nil {
+		log.Fatalf("Error getting moves from MQ %v", moveSubSuccess)
+	}
+
+	rabbitChannel, err := newConnection.Channel()
+	if err != nil {
+		log.Fatalf("Error connecting to channel: %s", binderr)
 	}
 
 	for {
@@ -46,7 +56,12 @@ func main() {
 		} else if result[0] == "spawn" {
 			newState.CommandSpawn(result)
 		} else if result[0] == "move" {
-			newState.CommandMove(result)
+			armyMove, err := newState.CommandMove(result)
+			if err != nil {
+				log.Println("Trouble with move: ", err)
+			}
+			pubsub.PublishJSON(rabbitChannel, routing.ExchangePerilTopic, routing.ArmyMovesPrefix+"."+usernameString, armyMove)
+			log.Println("Success published move.")
 		} else if result[0] == "status" {
 			newState.CommandStatus()
 		} else if result[0] == "help" {
@@ -70,9 +85,22 @@ func main() {
 
 }
 
-func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
-	return func(ps routing.PlayingState) {
+func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.AckType {
+	return func(ps routing.PlayingState) pubsub.AckType {
 		defer fmt.Print("> ")
 		gs.HandlePause(ps)
+		return pubsub.Ack
+	}
+}
+
+func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) pubsub.AckType {
+	return func(am gamelogic.ArmyMove) pubsub.AckType {
+		defer fmt.Print("> ")
+		moveOutcome := gs.HandleMove(am)
+		if moveOutcome == gamelogic.MoveOutComeSafe || moveOutcome == gamelogic.MoveOutcomeMakeWar {
+			return pubsub.Ack
+		}
+
+		return pubsub.NackDiscard
 	}
 }
