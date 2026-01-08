@@ -109,8 +109,12 @@ func handlerMove(gs *gamelogic.GameState, rabbitChannel *amqp.Channel) func(game
 				Attacker: am.Player,
 				Defender: gs.GetPlayerSnap(),
 			}
-			pubsub.PublishJSON(rabbitChannel, routing.ExchangePerilTopic, routing.WarRecognitionsPrefix+"."+gs.GetUsername(), rOW)
-			return pubsub.NackRequeue
+			pubFail := pubsub.PublishJSON(rabbitChannel, routing.ExchangePerilTopic, routing.WarRecognitionsPrefix+"."+gs.GetUsername(), rOW)
+			if pubFail != nil {
+				fmt.Printf("error: %s\n", pubFail)
+				return pubsub.NackRequeue
+			}
+			return pubsub.Ack
 		}
 
 		return pubsub.NackDiscard
