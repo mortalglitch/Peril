@@ -49,7 +49,7 @@ func main() {
 		log.Fatalf("Error getting moves from MQ %v", moveSubSuccess)
 	}
 
-	warSubSuccess := pubsub.SubscribeJSON(newConnection, routing.ExchangePerilTopic, routing.WarRecognitionsPrefix, routing.WarRecognitionsPrefix+".*", pubsub.Durable, handlerWar(newState))
+	warSubSuccess := pubsub.SubscribeJSON(newConnection, routing.ExchangePerilTopic, routing.WarRecognitionsPrefix, routing.WarRecognitionsPrefix+".*", pubsub.Durable, handlerWar(newState, rabbitChannel))
 	if warSubSuccess != nil {
 		log.Fatalf("Error getting moves from MQ %v", warSubSuccess)
 	}
@@ -121,20 +121,44 @@ func handlerMove(gs *gamelogic.GameState, rabbitChannel *amqp.Channel) func(game
 	}
 }
 
-func handlerWar(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) pubsub.AckType {
+func handlerWar(gs *gamelogic.GameState, rabbitChannel *amqp.Channel) func(gamelogic.RecognitionOfWar) pubsub.AckType {
 	return func(row gamelogic.RecognitionOfWar) pubsub.AckType {
 		defer fmt.Print("> ")
-		outcome, _, _ := gs.HandleWar(row)
+		outcome, winner, loser := gs.HandleWar(row)
+
+		newGameLog := pubsub.GameLog{
+			Exchange:   routing.ExchangePerilTopic,
+			RoutingKey: routing.GameLogSlug + "." + gs.GetUsername(),
+		}
+
 		switch outcome {
 		case gamelogic.WarOutcomeNotInvolved:
 			return pubsub.NackRequeue
 		case gamelogic.WarOutcomeNoUnits:
 			return pubsub.NackDiscard
 		case gamelogic.WarOutcomeOpponentWon:
+			outcomeString := fmt.Sprintf("%s won a war against %s", winner, loser)
+			pubFail := pubsub.PublishGob(rabbitChannel, newGameLog.Exchange, newGameLog.RoutingKey, outcomeString)
+			if pubFail != nil {
+				fmt.Printf("error: %s\n", pubFail)
+				return pubsub.NackRequeue
+			}
 			return pubsub.Ack
 		case gamelogic.WarOutcomeYouWon:
+			outcomeString := fmt.Sprintf("%s won a war against %s", winner, loser)
+			pubFail := pubsub.PublishGob(rabbitChannel, newGameLog.Exchange, newGameLog.RoutingKey, outcomeString)
+			if pubFail != nil {
+				fmt.Printf("error: %s\n", pubFail)
+				return pubsub.NackRequeue
+			}
 			return pubsub.Ack
 		case gamelogic.WarOutcomeDraw:
+			outcomeString := fmt.Sprintf("A war between %s and %s resulted in a draw", winner, loser)
+			pubFail := pubsub.PublishGob(rabbitChannel, newGameLog.Exchange, newGameLog.RoutingKey, outcomeString)
+			if pubFail != nil {
+				fmt.Printf("error: %s\n", pubFail)
+				return pubsub.NackRequeue
+			}
 			return pubsub.Ack
 		}
 		fmt.Println("error: unknown war outcome")
