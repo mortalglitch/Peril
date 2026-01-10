@@ -40,6 +40,12 @@ func SubscribeGob[T any](conn *amqp.Connection, exchange, queueName, key string,
 		log.Fatalf("Error binding to channel and queue: %s", binderr)
 	}
 
+	err := channel.Qos(10, 0, false)
+	if err != nil {
+		log.Printf("Error setting channel parameters: %v", err)
+		return err
+	}
+
 	msg, err := channel.Consume(boundQueue.Name, "", false, false, false, false, nil)
 	if err != nil {
 		log.Printf("Error consuming message from MQ: %v", err)

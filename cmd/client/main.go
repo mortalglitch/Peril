@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
@@ -73,7 +74,24 @@ func main() {
 		} else if result[0] == "help" {
 			gamelogic.PrintClientHelp()
 		} else if result[0] == "spam" {
-			log.Println("Spamming not allowed yet!")
+			if len(result) != 2 {
+				log.Println("Spam usage 'spam XX' where XX is the number of messages.")
+				continue
+			}
+			n, err := strconv.Atoi(result[1])
+			if err != nil {
+				log.Println("Spam usage 'spam XX' where XX is the number of messages.")
+				continue
+			}
+
+			for i := 0; i < n; i++ {
+				pubFail := publishGameLog(rabbitChannel, newState.GetUsername(), gamelogic.GetMaliciousLog())
+				if pubFail != nil {
+					fmt.Printf("error: %s\n", pubFail)
+					continue
+				}
+			}
+
 		} else if result[0] == "quit" {
 			gamelogic.PrintQuit()
 			break
