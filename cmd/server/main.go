@@ -35,6 +35,11 @@ func main() {
 		log.Fatalf("Error binding to channel and queue: %s", binderr)
 	}
 
+	gameLogSubSuccess := pubsub.SubscribeGob(newConnection, routing.ExchangePerilTopic, routing.GameLogSlug, routing.GameLogSlug+".*", pubsub.Durable, handlerGameLogs(channel))
+	if gameLogSubSuccess != nil {
+		log.Fatalf("Error getting moves from MQ %v", gameLogSubSuccess)
+	}
+
 	for {
 		result := gamelogic.GetInput()
 		if len(result) == 0 {
@@ -69,4 +74,17 @@ func main() {
 	interrupt := <-signalChan
 	fmt.Println("Server shutting down: ", interrupt)
 	newConnection.Close()
+}
+
+func handlerGameLogs(rabbitChannel *amqp.Channel) func(routing.GameLog) pubsub.AckType {
+	return func(gl routing.GameLog) pubsub.AckType {
+		defer fmt.Print("> ")
+		gameLogSuccess := gamelogic.WriteLog(gl)
+		if gameLogSuccess != nil {
+			log.Printf("Error reading logs from RabbitMQ: %v", gameLogSuccess)
+			return pubsub.NackRequeue
+		}
+
+		return pubsub.NackDiscard
+	}
 }

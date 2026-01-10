@@ -10,11 +10,6 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-type GameLog struct {
-	Exchange   string
-	RoutingKey string //GameLogSlug.username
-}
-
 func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
 	data, err := json.Marshal(val)
 	if err != nil {

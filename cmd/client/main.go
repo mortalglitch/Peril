@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
@@ -126,11 +127,6 @@ func handlerWar(gs *gamelogic.GameState, rabbitChannel *amqp.Channel) func(gamel
 		defer fmt.Print("> ")
 		outcome, winner, loser := gs.HandleWar(row)
 
-		newGameLog := pubsub.GameLog{
-			Exchange:   routing.ExchangePerilTopic,
-			RoutingKey: routing.GameLogSlug + "." + gs.GetUsername(),
-		}
-
 		switch outcome {
 		case gamelogic.WarOutcomeNotInvolved:
 			return pubsub.NackRequeue
@@ -138,7 +134,7 @@ func handlerWar(gs *gamelogic.GameState, rabbitChannel *amqp.Channel) func(gamel
 			return pubsub.NackDiscard
 		case gamelogic.WarOutcomeOpponentWon:
 			outcomeString := fmt.Sprintf("%s won a war against %s", winner, loser)
-			pubFail := pubsub.PublishGob(rabbitChannel, newGameLog.Exchange, newGameLog.RoutingKey, outcomeString)
+			pubFail := publishGameLog(rabbitChannel, gs.GetUsername(), outcomeString)
 			if pubFail != nil {
 				fmt.Printf("error: %s\n", pubFail)
 				return pubsub.NackRequeue
@@ -146,7 +142,7 @@ func handlerWar(gs *gamelogic.GameState, rabbitChannel *amqp.Channel) func(gamel
 			return pubsub.Ack
 		case gamelogic.WarOutcomeYouWon:
 			outcomeString := fmt.Sprintf("%s won a war against %s", winner, loser)
-			pubFail := pubsub.PublishGob(rabbitChannel, newGameLog.Exchange, newGameLog.RoutingKey, outcomeString)
+			pubFail := publishGameLog(rabbitChannel, gs.GetUsername(), outcomeString)
 			if pubFail != nil {
 				fmt.Printf("error: %s\n", pubFail)
 				return pubsub.NackRequeue
@@ -154,7 +150,7 @@ func handlerWar(gs *gamelogic.GameState, rabbitChannel *amqp.Channel) func(gamel
 			return pubsub.Ack
 		case gamelogic.WarOutcomeDraw:
 			outcomeString := fmt.Sprintf("A war between %s and %s resulted in a draw", winner, loser)
-			pubFail := pubsub.PublishGob(rabbitChannel, newGameLog.Exchange, newGameLog.RoutingKey, outcomeString)
+			pubFail := publishGameLog(rabbitChannel, gs.GetUsername(), outcomeString)
 			if pubFail != nil {
 				fmt.Printf("error: %s\n", pubFail)
 				return pubsub.NackRequeue
@@ -164,4 +160,17 @@ func handlerWar(gs *gamelogic.GameState, rabbitChannel *amqp.Channel) func(gamel
 		fmt.Println("error: unknown war outcome")
 		return pubsub.NackDiscard
 	}
+}
+
+func publishGameLog(publishCh *amqp.Channel, username, msg string) error {
+	return pubsub.PublishGob(
+		publishCh,
+		routing.ExchangePerilTopic,
+		routing.GameLogSlug+"."+username,
+		routing.GameLog{
+			Username:    username,
+			CurrentTime: time.Now(),
+			Message:     msg,
+		},
+	)
 }
